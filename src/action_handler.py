@@ -1,8 +1,9 @@
+# src/action_handler.py
 import logging
 
 logger = logging.getLogger("action_handler")
 
-action_registry = {}    
+action_registry = {}
 
 def register_action(action_name):
     def decorator(func):
@@ -12,9 +13,7 @@ def register_action(action_name):
 
 def execute_action(agent, action_name, **kwargs):
     if action_name in action_registry:
-       return action_registry[action_name](agent, **kwargs)
+        return action_registry[action_name](agent, **kwargs)
     else:
         logger.error(f"Action {action_name} not found")
         return None
-    
-

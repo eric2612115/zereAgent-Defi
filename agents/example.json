@@ -57,6 +57,10 @@
       "chain_id": "45762"
     },
     {
+      "name": "gemini",
+      "model": "gemini-2.0-flash"
+    },
+    {
       "name": "ollama",
       "base_url": "http://localhost:11434",
       "model": "llama3.2"

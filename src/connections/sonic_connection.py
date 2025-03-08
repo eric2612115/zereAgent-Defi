@@ -18,38 +18,37 @@ class SonicConnectionError(Exception):
     pass
 
 class SonicConnection(BaseConnection):
-    
+
     def __init__(self, config: Dict[str, Any]):
         logger.info("Initializing Sonic connection...")
         self._web3 = None
-        
-        # Get network configuration
-        network = config.get("network", "mainnet")
-        if network not in SONIC_NETWORKS:
-            raise ValueError(f"Invalid network '{network}'. Must be one of: {', '.join(SONIC_NETWORKS.keys())}")
-            
-        network_config = SONIC_NETWORKS[network]
-        self.explorer = network_config["scanner_url"]
-        self.rpc_url = network_config["rpc_url"]
-        
-        super().__init__(config)
+
+        # Get network configuration from .env
+        self.rpc_url = os.getenv("SONIC_RPC_URL")
+        if not self.rpc_url:
+            raise ValueError("SONIC_RPC_URL environment variable not set.")
+
+        super().__init__(config) # config 還是要正確
         self._initialize_web3()
         self.ERC20_ABI = ERC20_ABI
         self.NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
-        self.aggregator_api = "https://aggregator-api.kyberswap.com/sonic/api/v1"
+        self.aggregator_api = "https://aggregator-api.kyberswap.com/sonic/api/v1" #先保留 之後可能還是會用到
 
     def _get_explorer_link(self, tx_hash: str) -> str:
         """Generate block explorer link for transaction"""
-        return f"{self.explorer}/tx/{tx_hash}"
+        # return f"{self.explorer}/tx/{tx_hash}" #不再需要
+        #  根據您的 Sonic 測試網/主網設定修改
+        return f"https://scan.sonic.network/tx/{tx_hash}" # 假設是這個
 
     def _initialize_web3(self):
         """Initialize Web3 connection"""
         if not self._web3:
             self._web3 = Web3(Web3.HTTPProvider(self.rpc_url))
+            # Sonic is a POA chain
             self._web3.middleware_onion.inject(geth_poa_middleware, layer=0)
             if not self._web3.is_connected():
                 raise SonicConnectionError("Failed to connect to Sonic network")
-            
+
             try:
                 chain_id = self._web3.eth.chain_id
                 logger.info(f"Connected to network with chain ID: {chain_id}")
@@ -61,23 +60,15 @@ class SonicConnection(BaseConnection):
         return False
 
     def validate_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate Sonic configuration from JSON"""
-        required = ["network"]
-        missing = [field for field in required if field not in config]
-        if missing:
-            raise ValueError(f"Missing config fields: {', '.join(missing)}")
-        
-        if config["network"] not in SONIC_NETWORKS:
-            raise ValueError(f"Invalid network '{config['network']}'. Must be one of: {', '.join(SONIC_NETWORKS.keys())}")
-            
+        # 簡化 config 驗證，因為我們現在直接從 .env 讀取
         return config
 
     def get_token_by_ticker(self, ticker: str) -> Optional[str]:
-        """Get token address by ticker symbol"""
+        """Get token address by ticker symbol (using an external API, since we don't have chain info)."""
         try:
-            if ticker.lower() in ["s", "S"]:
+            if ticker.lower() in ["s", "S"]: # 如果是查詢原生代幣
                 return "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
-                
+
             response = requests.get(
                 f"https://api.dexscreener.com/latest/dex/search?q={ticker}"
             )
@@ -88,9 +79,9 @@ class SonicConnection(BaseConnection):
                 return None
 
             sonic_pairs = [
-                pair for pair in data["pairs"] if pair.get("chainId") == "sonic"
+                pair for pair in data["pairs"] if pair.get("chainId") == "sonic"  # Use "sonic"
             ]
-            sonic_pairs.sort(key=lambda x: x.get("fdv", 0), reverse=True)
+            sonic_pairs.sort(key=lambda x: x.get("fdv", 0), reverse=True) #依照fdv排序
 
             sonic_pairs = [
                 pair
@@ -145,40 +136,24 @@ class SonicConnection(BaseConnection):
         }
 
     def configure(self) -> bool:
+        # 現在設定只需要檢查 SONIC_RPC_URL
         logger.info("\n🔷 SONIC CHAIN SETUP")
         if self.is_configured():
-            logger.info("Sonic connection is already configured")
-            response = input("Do you want to reconfigure? (y/n): ")
-            if response.lower() != 'y':
-                return True
-
-        try:
-            if not os.path.exists('.env'):
-                with open('.env', 'w') as f:
-                    f.write('')
-
-            private_key = input("\nEnter your wallet private key: ")
-            if not private_key.startswith('0x'):
-                private_key = '0x' + private_key
-            set_key('.env', 'SONIC_PRIVATE_KEY', private_key)
-
-            if not self._web3.is_connected():
-                raise SonicConnectionError("Failed to connect to Sonic network")
-
-            account = self._web3.eth.account.from_key(private_key)
-            logger.info(f"\n✅ Successfully connected with address: {account.address}")
+            logger.info("Sonic connection is already configured.")
             return True
 
-        except Exception as e:
-            logger.error(f"Configuration failed: {e}")
-            return False
+        # 如果需要，可以在這裡提示使用者輸入 SONIC_RPC_URL，並將其儲存到 .env
+        # 但通常 RPC URL 應該在環境變數中預先設定好
+
+        return True # 如果不需要使用者輸入，直接返回 True
+
 
     def is_configured(self, verbose: bool = False) -> bool:
         try:
             load_dotenv()
-            if not os.getenv('SONIC_PRIVATE_KEY'):
+            if not os.getenv('SONIC_RPC_URL'): # 檢查環境變數
                 if verbose:
-                    logger.error("Missing SONIC_PRIVATE_KEY in .env")
+                    logger.error("Missing SONIC_RPC_URL in environment variables")
                 return False
 
             if not self._web3.is_connected():
@@ -193,26 +168,23 @@ class SonicConnection(BaseConnection):
             return False
 
     def get_balance(self, address: Optional[str] = None, token_address: Optional[str] = None) -> float:
-        """Get balance for an address or the configured wallet"""
+        """Get balance for an address or the configured wallet."""
         try:
-            if not address:
-                private_key = os.getenv('SONIC_PRIVATE_KEY')
-                if not private_key:
-                    raise SonicConnectionError("No wallet configured")
-                account = self._web3.eth.account.from_key(private_key)
-                address = account.address
 
-            if token_address:
-                contract = self._web3.eth.contract(
-                    address=Web3.to_checksum_address(token_address),
-                    abi=self.ERC20_ABI
-                )
-                balance = contract.functions.balanceOf(address).call()
+            if not address:
+                raise "address is needed"  # 應該要給 address
+
+            if token_address:  # ERC-20 token
+                token_address = Web3.to_checksum_address(token_address)
+                contract = self._web3.eth.contract(address=token_address, abi=self.ERC20_ABI)
+                balance_wei = contract.functions.balanceOf(Web3.to_checksum_address(address)).call()
                 decimals = contract.functions.decimals().call()
-                return balance / (10 ** decimals)
-            else:
-                balance = self._web3.eth.get_balance(address)
-                return self._web3.from_wei(balance, 'ether')
+                balance = balance_wei / (10 ** decimals)
+            else:  # Native token ($S)
+                balance_wei = self._web3.eth.get_balance(Web3.to_checksum_address(address))
+                balance = self._web3.from_wei(balance_wei, 'ether')
+
+            return float(balance)
 
         except Exception as e:
             logger.error(f"Failed to get balance: {e}")

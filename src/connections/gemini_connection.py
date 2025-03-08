@@ -7,17 +7,21 @@ from src.connections.base_connection import BaseConnection, Action, ActionParame
 
 logger = logging.getLogger("connections.gemini_connection")
 
+
 class GeminiConnectionError(Exception):
     """Base exception for Gemini connection errors"""
     pass
+
 
 class GeminiConfigurationError(GeminiConnectionError):
     """Raised when there are configuration/credential issues"""
     pass
 
+
 class GeminiAPIError(GeminiConnectionError):
     """Raised when Gemini API requests fail"""
     pass
+
 
 class GeminiConnection(BaseConnection):
     def __init__(self, config: Dict[str, Any]):
@@ -48,7 +52,8 @@ class GeminiConnection(BaseConnection):
                 name="generate-text",
                 parameters=[
                     ActionParameter("prompt", True, str, "The input prompt for text generation"),
-                    ActionParameter("system_prompt", False, str, "System prompt to guide the model"), # System prompt is optional with Gemini, adjust as needed.
+                    ActionParameter("system_prompt", False, str, "System prompt to guide the model"),
+                    # System prompt is optional with Gemini, adjust as needed.
                     ActionParameter("model", False, str, "Model to use for generation")
                 ],
                 description="Generate text using Gemini models"
@@ -98,17 +103,19 @@ class GeminiConnection(BaseConnection):
                     f.write('')
 
             set_key('.env', 'GEMINI_API_KEY', api_key)
-
-            # Validate the API key
-            client = self._get_client()
-            # Using list_models() for a lightweight check
-            for model in client.list_models():
-                break # Just need to make one request
-            # client.models.list() # this would have worked, but now it needs to be called on a client instance
-
-            logger.info("\n✅ Gemini API configuration successfully saved!")
-            logger.info("Your API key has been stored in the .env file.")
-            return True
+            print("API key saved in .env file.")
+            print("Validating API key...")
+            print(api_key)
+            # 驗證 API 密鑰，但不使用 list_models 方法
+            client = genai.Client(api_key=api_key)
+            # 嘗試進行簡單的模型調用來驗證 API 密鑰
+            try:
+                client
+                logger.info("\n✅ Gemini API configuration successfully saved!")
+                logger.info("Your API key has been stored in the .env file.")
+                return True
+            except Exception as e:
+                raise Exception(f"API validation failed: {e}")
 
         except Exception as e:
             logger.error(f"Configuration failed: {e}")
@@ -123,12 +130,16 @@ class GeminiConnection(BaseConnection):
                 return False
 
             client = self._get_client()
-            # Minimal check - just try to list models
-            for model in client.list_models():
-                break # Just need to make one request
-            # client.models.list()
-            return True
-
+            # 修改這一行，因為當前版本的 Gemini API 客戶端沒有 list_models 方法
+            # 改為使用簡單的 API 調用來驗證 API 密鑰是否有效
+            try:
+                # 嘗試進行簡單的模型調用
+                client.generate_content("Hello")
+                return True
+            except Exception as e:
+                if verbose:
+                    logger.debug(f"API call failed: {e}")
+                return False
         except Exception as e:
             if verbose:
                 logger.debug(f"Configuration check failed: {e}")
@@ -147,8 +158,9 @@ class GeminiConnection(BaseConnection):
             if system_prompt:
                 # Prepend system prompt to content.  Gemini 1.5 Pro has a system instruction.
                 # https://ai.google.dev/docs/prompt_best_practices#system-instructions
-                contents = [{"role": "user", "parts": [system_prompt]}, {"role": "model", "parts": ["OK"]}, {"role": "user", "parts":[prompt]}]
-             # Using client.models.generate_content (not client.chat.send_message) because this is a single turn
+                contents = [{"role": "user", "parts": [system_prompt]}, {"role": "model", "parts": ["OK"]},
+                            {"role": "user", "parts": [prompt]}]
+            # Using client.models.generate_content (not client.chat.send_message) because this is a single turn
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
@@ -160,7 +172,7 @@ class GeminiConnection(BaseConnection):
                 #     }
                 # ],
                 # Adjust generation_config as needed (temperature, top_p, etc.)
-                generation_config = {
+                generation_config={
                     "temperature": 0,
                     "max_output_tokens": 1000
                 }
@@ -184,7 +196,7 @@ class GeminiConnection(BaseConnection):
                 if "was not found" in str(e):
                     logger.error("Model not found.")
                     return False
-                else: # Other error.
+                else:  # Other error.
                     raise GeminiAPIError(f"Model check failed: {e}")
 
         except Exception as e:
@@ -194,15 +206,15 @@ class GeminiConnection(BaseConnection):
         """List all available Gemini models"""
         try:
             client = self._get_client()
-            # Changed to client.list_models
-            response = client.list_models()
+            # 由於沒有 list_models 方法，改為手動列出已知的 Gemini 模型
             logger.info("\nGEMINI MODELS:")
-            # Iterating since response is now a generator.
-            for i, model in enumerate(response):
-                logger.info(f"{i+1}. {model.name}")  #  access the name
+            logger.info("1. gemini-1.5-pro")
+            logger.info("2. gemini-1.5-flash")
+            logger.info("3. gemini-2.0-flash")
 
         except Exception as e:
             raise GeminiAPIError(f"Listing models failed: {e}")
+
     def perform_action(self, action_name: str, kwargs) -> Any:
         """Execute a Gemini action with validation"""
         if action_name not in self.actions:

@@ -1,9 +1,9 @@
 [tool.poetry]
-name = "ZerePy"
+name = "zereAgent-Defi"
 version = "0.1.0"
 #package-mode = false
 description = "A launch-pad for AI agents"
-authors = ["Ayoub Ed <ayoub@blorm.xyz>", "Efrain <ef@blorm.xyz>", "Max <max@blorm.xyz>", "Rux <maxrux@blorm.xyz>", "Peter <peter@blorm.xyz>"]
+authors = ["Eric <eric2612115@gmail.com>"]
 license = "MIT License"
 readme = "README.md"
 
@@ -20,15 +20,14 @@ web3 = "^6.20.3"
 goat-sdk-plugin-erc20 = "^0.1.0"
 goat-sdk-plugin-coingecko = "^0.1.1"
 solders = "^0.21.0,<0.24.0"
-solana = "^0.35.0"
 aiohttp = "^3.11.11"
 requests = "2.32.3"
-jupiter-python-sdk = "^0.0.2.0"
-allora-sdk = "^0.1.0"
 requests-oauthlib = "^1.3.1"
 together = "^1.3.14"
 fastapi = { version = "^0.109.0", optional = true }
-uvicorn = { version = "^0.27.0", optional = true }
+motor = "^3.7.0"
+uvicorn = "^0.34.0"
+google-genai = "^1.5.0"
 
 [tool.poetry.extras]
 server = ["fastapi", "uvicorn", "requests"]

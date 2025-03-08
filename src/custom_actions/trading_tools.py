@@ -230,3 +230,54 @@ def approve_and_swap(agent, **kwargs):
     except Exception as e:
         logger.exception(f"Error in approve_and_swap: {e}")
         return f"Error: {e}"
+
+
+@register_action("get_multisig_info")
+def get_multisig_info(agent, **kwargs):
+    """
+    獲取使用者的多簽錢包資訊。
+
+    Args:
+        agent: The agent instance.
+        kwargs:
+            wallet_address (str): 使用者的錢包地址 (擁有者地址)。
+
+    Returns:
+        dict: 包含多簽錢包資訊的字典，例如：
+              {"multisig_address": "0x...", "chain": "base", "whitelist": [...]}
+              如果出錯，返回包含 "error" 鍵的字典。
+    """
+    wallet_address = kwargs.get("wallet_address")
+    if not wallet_address:
+        return {"error": "wallet_address is required."}
+
+    try:
+        #  呼叫您的 FastAPI 端點
+        api_url = "http://localhost:7788/api/get-multisig-wallets"  # 根據您的設定修改
+        response = requests.post(api_url, json={"wallet_address": wallet_address}) # POST
+        response.raise_for_status()
+        data = response.json()
+
+        if "multisig_address" in data:
+            # 假設您的 API 會返回 chain 和 whitelist (如果有的話)
+            # 您需要根據 API 的實際回應格式調整這裡
+            multisig_address = data["multisig_address"]
+            # 這裡假設您的 API *會* 返回 chain 和 whitelist
+            # 如果沒有，您需要從其他地方獲取 (例如，從鏈上合約讀取)
+            chain = data.get("chain", "base")  # 預設為 base，如果 API 沒有返回
+            whitelist = data.get("whitelist", [])  # 預設為空列表
+
+            return {
+                "multisig_address": multisig_address,
+                "chain": chain,
+                "whitelist": whitelist
+            }
+        else:
+            return {"error": f"Multisig wallet not found for {wallet_address}."}
+
+    except requests.exceptions.RequestException as e:
+        logger.exception(f"Error calling API: {e}")
+        return {"error": f"API call failed: {e}"}
+    except Exception as e:
+        logger.exception(f"Error in get_multisig_info: {e}")
+        return {"error": f"An unexpected error occurred: {e}"}

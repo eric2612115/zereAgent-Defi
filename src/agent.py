@@ -11,6 +11,8 @@ from src.action_handler import execute_action
 import src.actions.twitter_actions  
 import src.actions.echochamber_actions
 import src.actions.solana_actions
+import src.custom_actions.trading_tools
+import src.actions.my_tools
 from datetime import datetime
 
 REQUIRED_FIELDS = ["name", "bio", "traits", "examples", "loop_delay", "config", "tasks"]
@@ -22,6 +24,7 @@ class ZerePyAgent:
             self,
             agent_name: str
     ):
+        self.config = None
         try:
             agent_path = Path("agents") / f"{agent_name}.json"
             agent_dict = json.load(open(agent_path, "r"))
@@ -71,6 +74,29 @@ class ZerePyAgent:
             logger.error("Could not load ZerePy agent")
             raise e
 
+    def save_config(self):
+        """Save the agent configuration to a file"""
+        try:
+            agent_path = Path("agents") / f"{self.name}.json"
+            # Convert the agent to a dictionary
+            agent_dict = {
+                "name": self.name,
+                "bio": self.bio,
+                "traits": self.traits,
+                "examples": self.examples,
+                "example_accounts": self.example_accounts,
+                "loop_delay": self.loop_delay,
+                "config": self.config,
+                "tasks": self.tasks,
+                "use_time_based_weights": self.use_time_based_weights,
+                "time_based_multipliers": self.time_based_multipliers
+            }
+            with open(agent_path, "w") as f:
+                json.dump(agent_dict, f, indent=2)
+            logger.info(f"Agent configuration saved to {agent_path}")
+        except Exception as e:
+            logger.error(f"Failed to save agent configuration: {e}")
+            raise
     def _setup_llm_provider(self):
         # Get first available LLM provider and its model
         llm_providers = self.connection_manager.get_model_providers()

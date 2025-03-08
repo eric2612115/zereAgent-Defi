@@ -1,5 +1,8 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import json
 
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import WebSocket, WebSocketDisconnect, Query
+from .websocket_handler import ConnectionManager
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import logging
@@ -79,7 +82,78 @@ class ZerePyServer:
         self.state = ServerState()
         self.setup_routes()
 
+        self.connection_manager = ConnectionManager()
+        self.connection_manager.register_message_handler(self.handle_websocket_message)
+
+    async def handle_websocket_message(self, wallet_address: str, agent_name: str, message_data: dict):
+        """處理從 WebSocket 接收到的消息，並使用 agent 生成響應"""
+        query = message_data.get("query", "")
+
+        # 確保加載了正確的代理
+        try:
+            if not self.state.cli.agent or self.state.cli.agent.name != agent_name:
+                self.state.cli._load_agent_from_file(agent_name)
+                logger.info(f"Loaded agent: {agent_name}")
+        except Exception as e:
+            return f"Error loading agent {agent_name}: {str(e)}"
+
+        try:
+            # 直接指定使用 Anthropic
+            provider = "anthropic"
+
+            # 檢查 Anthropic 是否已配置
+            if provider not in self.state.cli.agent.connection_manager.connections:
+                logger.error(f"Provider '{provider}' not found in available connections")
+                return f"Provider '{provider}' not found. Please check agent configuration."
+
+            connection = self.state.cli.agent.connection_manager.connections[provider]
+            if not connection.is_configured():
+                logger.error(f"Provider '{provider}' is not configured")
+                return f"Provider '{provider}' is not configured. Please check .env file."
+
+            # 生成系統提示
+            system_prompt = self.state.cli.agent._construct_system_prompt()
+
+            # 執行 generate-text 動作
+            result = self.state.cli.agent.connection_manager.perform_action(
+                connection_name=provider,
+                action_name="generate-text",
+                params=[query, system_prompt]
+            )
+
+            return result
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}")
+            return f"Error generating response: {str(e)}"
+
     def setup_routes(self):
+
+        @self.app.websocket("/ws/{wallet_address}")
+        async def websocket_endpoint(
+                websocket: WebSocket,
+                wallet_address: str,
+                agent_name: str = Query(default="StarterAgent")
+        ):
+            """WebSocket 端點處理連接和消息"""
+            await self.connection_manager.connect(websocket, wallet_address, agent_name)
+
+            try:
+                while True:
+                    data = await websocket.receive_text()
+                    message_data = json.loads(data)
+                    await self.connection_manager.handle_incoming_message(wallet_address, message_data)
+            except WebSocketDisconnect:
+                await self.connection_manager.disconnect(wallet_address)
+            except Exception as e:
+                logger.error(f"WebSocket error: {str(e)}")
+                await self.connection_manager.send_message(
+                    wallet_address,
+                    {"text": f"Server error: {str(e)}", "message_type": "error"}
+                )
+                await self.connection_manager.disconnect(wallet_address)
+
+        # 在 ZerePyServer 類中添加新方法
+
         @self.app.get("/")
         async def root():
             """Server status endpoint"""

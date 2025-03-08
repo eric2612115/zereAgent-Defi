@@ -1,6 +1,8 @@
 # your_project_root/src/custom_actions/my_tools.py
 import logging
 import os
+
+import requests
 from dotenv import load_dotenv
 from src.action_handler import register_action
 
@@ -127,3 +129,5 @@ def swap_tokens(agent, **kwargs):
     except Exception as e:
         logger.exception(f"Error swapping tokens: {e}")
         return f"Error: An unexpected error occurred: {e}"
+
+

@@ -4,4 +4,4 @@ from .app import create_app
 def start_server(host: str = "0.0.0.0", port: int = 8000):
     """Start the ZerePy server"""
     app = create_app()
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, ws_ping_interval=30, ws_ping_timeout=60)

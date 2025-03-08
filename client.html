@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ZerePy AI Trading Assistant</title>
+    <style>
+        #messages {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 10px;
+            height: 300px;
+            overflow-y: scroll;
+        }
+        .user-message {
+            text-align: right;
+            color: blue;
+        }
+        .ai-message {
+            text-align: left;
+            color: green;
+        }
+        .thinking-message {
+            text-align: left;
+            color: gray;
+            font-style: italic;
+        }
+        .error-message {
+            text-align: left;
+            color: red;
+        }
+        .status-message {
+            text-align: left;
+            color: orange;
+        }
+        #input-area {
+            display: flex;
+        }
+        #messageInput {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>ZerePy AI Trading Assistant</h1>
+
+    <div id="messages"></div>
+
+    <div id="input-area">
+        <input type="text" id="messageInput" placeholder="Type your message...">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <script>
+        const walletAddress = "0xa8f7bb74ed0376593b2f00ffd704fed916e2ce7f"; // 替換為您的錢包地址！
+        const agentName = "StarterAgent"; // 預設的 Agent
+        const socket = new WebSocket(`ws://localhost:8000/ws/${walletAddress}?agent_name=${agentName}`);
+        socket.onopen = () => {
+            console.log("WebSocket connected!");
+            // 可以發送初始訊息
+            // socket.send(JSON.stringify({ query: "Hello" }));
+        };
+
+        socket.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            displayMessage(message);
+        };
+
+        socket.onclose = (event) => {
+            console.log("WebSocket closed:", event);
+            displayMessage({ text: "Connection closed.", message_type: "status" });
+        };
+
+        socket.onerror = (error) => {
+            console.error("WebSocket error:", error);
+            displayMessage({ text: `WebSocket error: ${error}`, message_type: "error" });
+        };
+
+        function sendMessage() {
+            const inputField = document.getElementById("messageInput");
+            const messageText = inputField.value.trim();
+
+            if (messageText) {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ query: messageText }));
+                    displayMessage({text: messageText, sender: "user"}, "user-message");
+                    inputField.value = ""; // 清空輸入框
+                } else {
+                    console.error("WebSocket is not open.");
+                }
+            }
+        }
+        //按下 Enter 發送訊息
+        document.getElementById("messageInput").addEventListener("keydown", function(event) {
+            if (event.key === "Enter") {
+              event.preventDefault(); // Prevent default behavior (form submission, newline in textarea)
+              sendMessage();
+            }
+        });
+
+        function displayMessage(message, customClass = "") {
+          const messagesDiv = document.getElementById("messages");
+          const messageElement = document.createElement("div");
+          let messageText = "";
+
+          if (message.message_type === "normal") {
+              messageText = `AI: ${typeof message.text === 'object' ? JSON.stringify(message.text) : message.text}`;
+              messageElement.classList.add("ai-message");
+          } else if (message.message_type === "thinking") {
+              messageText = `Thinking: ${message.text}`;
+              messageElement.classList.add("thinking-message");
+          } else if (message.message_type === "error") {
+              messageText = `Error: ${message.text}`;
+              messageElement.classList.add("error-message");
+          } else if (message.message_type === "status") {
+                messageText = `Status: ${message.text}`;
+                messageElement.classList.add("status-message");
+          } else if(message.sender === "user") {
+                messageText = `You: ${message.text}`;
+                messageElement.classList.add("user-message");
+          } else { //處理其他狀況
+                messageText = `${message.sender??"unknown"}: ${message.text}`;
+          }
+
+
+          messageElement.textContent = messageText;
+          if(customClass){
+            messageElement.classList.add(customClass); // 使用參數加入
+          }
+
+          messagesDiv.appendChild(messageElement);
+          messagesDiv.scrollTop = messagesDiv.scrollHeight; // 捲動到最底部
+        }
+
+    </script>
+</body>
+</html>

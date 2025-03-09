@@ -3,7 +3,7 @@
 import uvicorn
 import os
 from dotenv import load_dotenv
-from enhanced_server import create_enhanced_server
+from enhanced_server import create_app
 
 # Load environment variables
 load_dotenv()
@@ -15,7 +15,7 @@ port = int(os.getenv("PORT", 8000))
 host = os.getenv("HOST", "0.0.0.0")
 
 # Create the enhanced server
-app = create_enhanced_server()
+app = create_app()
 
 if __name__ == "__main__":
     print(f"Starting Enhanced ZerePy Server on {host}:{port}")

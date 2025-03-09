@@ -19,6 +19,9 @@ def think_and_plan(agent, **kwargs):
     sub_phase_content = kwargs.get("sub_phase_content", "Identifying explicit request type")
 
     # Store the current phase in agent state
+    if not hasattr(agent, 'state'):
+        agent.state = {}
+
     agent.state["current_main_phase"] = main_phase
     agent.state["current_main_phase_content"] = main_phase_content
     agent.state["current_sub_phase"] = sub_phase
@@ -61,6 +64,9 @@ def phase_transition(agent, **kwargs):
     transition_reason = kwargs.get("transition_reason", "Moving to next phase")
 
     # Update agent state with new phase
+    if not hasattr(agent, 'state'):
+        agent.state = {}
+
     agent.state["current_main_phase"] = next_main_phase
     agent.state["current_main_phase_content"] = next_main_phase_content
     agent.state["current_sub_phase"] = next_sub_phase
@@ -92,6 +98,9 @@ def reflect_on_error(agent, **kwargs):
     sub_phase_content = kwargs.get("sub_phase_content", "Self-checking plan optimization")
 
     # Store the current phase in agent state
+    if not hasattr(agent, 'state'):
+        agent.state = {}
+
     agent.state["current_main_phase"] = main_phase
     agent.state["current_main_phase_content"] = main_phase_content
     agent.state["current_sub_phase"] = sub_phase

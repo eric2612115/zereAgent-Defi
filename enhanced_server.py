@@ -1,10 +1,8 @@
-# root path: enhanced_server.py
-
+# enhanced_server.py
 import asyncio
+import json
 import logging
 import os
-import json
-import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, Any, List
@@ -24,6 +22,15 @@ from backend.dex_api_client.third_client import ThirdPartyClient
 from backend.dex_api_client.cave_client import CaveClient
 from backend.dex_api_client.public_data import get_binance_tickers
 
+# Ensure tool modules are imported and registered
+try:
+    import src.custom_actions.phase_tools
+    import src.custom_actions.trading_tools
+    import src.custom_actions.api_tools
+    import src.actions.my_tools
+except ImportError as e:
+    logging.warning(f"Could not import some tool modules: {e}")
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("enhanced_server")
@@ -32,32 +39,53 @@ logger = logging.getLogger("enhanced_server")
 # Message structure helper
 class MessageStructure:
     @staticmethod
+    def format_message(sender: str, text: str, message_type: str = "normal") -> Dict[str, Any]:
+        """
+        格式化一般訊息。
+        """
+        return {
+            "id": str(uuid4()),
+            "sender": sender,
+            "text": text,
+            "message_type": message_type,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    @staticmethod
+    def format_thinking(text: str) -> Dict[str, Any]:
+        """
+        格式化 AI 思考中的訊息。
+        """
+        return MessageStructure.format_message("system", text, "thinking")
+
+    @staticmethod
+    def format_status(text: str) -> Dict[str, Any]:
+        """
+        格式化狀態更新訊息。
+        """
+        return MessageStructure.format_message("system", text, "status")
+
+    @staticmethod
+    def format_error(text: str) -> Dict[str, Any]:
+        """
+        格式化錯誤訊息。
+        """
+        return MessageStructure.format_message("system", text, "error")
+
+    @staticmethod
     def format_ai_response(content: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        格式化 AI 的最終回覆 (可以是文字或結構化資料)。
+        重要：確保 text 字段是一個字符串。
+        """
+        text = content.get("recommendation", "")
+        if isinstance(text, dict):
+            text = json.dumps(text)  # 如果是字典，轉成JSON字符串
         return {
             "id": str(uuid4()),
-            "sender": "ai",
-            "text": content.get("recommendation", ""),
+            "sender": "agent",
+            "text": text,
             "message_type": content.get("message_type", "normal"),
-            "timestamp": datetime.now().isoformat()
-        }
-
-    @staticmethod
-    def format_error(error_text: str) -> Dict[str, Any]:
-        return {
-            "id": str(uuid4()),
-            "sender": "system",
-            "text": error_text,
-            "message_type": "error",
-            "timestamp": datetime.now().isoformat()
-        }
-
-    @staticmethod
-    def format_status(status_text: str) -> Dict[str, Any]:
-        return {
-            "id": str(uuid4()),
-            "sender": "system",
-            "text": status_text,
-            "message_type": "status",
             "timestamp": datetime.now().isoformat()
         }
 
@@ -74,6 +102,7 @@ async def lifespan(app: FastAPI):
         # 獲取應用狀態中的服務
         connection_manager = app.state.connection_manager
         db_client = app.state.db_client
+        cli = app.state.cli
 
         # 將 agent 設置為忙碌狀態
         connection_manager.set_agent_busy(wallet_address, True)
@@ -84,34 +113,49 @@ async def lifespan(app: FastAPI):
             if not agent:
                 await connection_manager.send_message(
                     wallet_address,
-                    {"sender": "system", "text": "No agent available for this user.", "message_type": "error"}
+                    MessageStructure.format_error("No agent available for this user.")
                 )
                 return
 
             # 發送思考中狀態
-            thinking_message = {"sender": "system", "text": "Thinking...", "message_type": "thinking"}
+            thinking_message = MessageStructure.format_thinking("Thinking...")
             await connection_manager.send_message(wallet_address, thinking_message)
 
             # 使用 agent 的 LLM 生成回應
             try:
-                # 使用您的 ZerePyCLI 實例
-                cli = agent  # 假設 get_agent_for_user 返回的是 ZerePyCLI 實例
+                # 檢查是否有 anthropic 連接
+                if "anthropic" not in agent.connection_manager.connections:
+                    logger.error("No anthropic connection found")
+                    error_message = MessageStructure.format_error(
+                        "No anthropic connection found. Please check agent configuration.")
+                    await db_client.save_message(wallet_address, error_message)
+                    await connection_manager.send_message(wallet_address, error_message)
+                    return "Error: No anthropic connection found."
 
-                # 使用 anthropic 生成文本
-                result = cli.connection_manager.perform_action(
+                # 獲取連接
+                connection = agent.connection_manager.connections["anthropic"]
+
+                # 檢查是否已配置
+                if not connection.is_configured():
+                    logger.error("Anthropic connection is not configured")
+                    error_message = MessageStructure.format_error(
+                        "Anthropic connection is not configured. Please check .env file.")
+                    await db_client.save_message(wallet_address, error_message)
+                    await connection_manager.send_message(wallet_address, error_message)
+                    return "Error: Anthropic connection is not configured."
+
+                # 生成系統提示
+                system_prompt = agent._construct_system_prompt()
+
+                # 使用 generate-text-with-tools 動作
+                result = agent.connection_manager.perform_action(
                     connection_name="anthropic",
                     action_name="generate-text",
-                    params=[query, cli._construct_system_prompt()]
+                    params=[query, system_prompt]
                 )
 
                 # 格式化並發送回應
-                ai_response = {
-                    "id": str(uuid4()),
-                    "sender": "ai",
-                    "text": result,
-                    "message_type": "normal",
-                    "timestamp": datetime.now().isoformat()
-                }
+                ai_response = MessageStructure.format_message("agent", result)
 
                 await db_client.save_message(wallet_address, ai_response)
                 await connection_manager.send_message(wallet_address, ai_response)
@@ -120,14 +164,16 @@ async def lifespan(app: FastAPI):
 
             except Exception as e:
                 logger.exception(f"Error generating response: {e}")
+                error_message = MessageStructure.format_error(f"Error generating response: {str(e)}")
+                await db_client.save_message(wallet_address, error_message)
+                await connection_manager.send_message(wallet_address, error_message)
                 return f"Error generating response: {str(e)}"
 
         except Exception as e:
             logger.exception(f"Error processing message: {e}")
 
             # 發送錯誤消息給客戶端
-            error_message = {"sender": "system", "text": f"Sorry, I encountered an error: {str(e)}",
-                             "message_type": "error"}
+            error_message = MessageStructure.format_error(f"Sorry, I encountered an error: {str(e)}")
             await db_client.save_message(wallet_address, error_message)
             await connection_manager.send_message(wallet_address, error_message)
 
@@ -136,6 +182,7 @@ async def lifespan(app: FastAPI):
         finally:
             # 將 agent 設置為非忙碌狀態
             connection_manager.set_agent_busy(wallet_address, False)
+
     # Database client
     mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     database_name = os.getenv("DATABASE_NAME", "zerepy_db")
@@ -143,6 +190,9 @@ async def lifespan(app: FastAPI):
 
     # Initialize DB indexes
     await db_client.initialize_indexes()
+
+    # Initialize CLI
+    cli = ZerePyCLI()
 
     # Initialize API clients
     okx_client = OkxWeb3Client(
@@ -173,6 +223,7 @@ async def lifespan(app: FastAPI):
 
     # Store clients in app state
     app.state.db_client = db_client
+    app.state.cli = cli
     app.state.okx_client = okx_client
     app.state.third_party_client = third_party_client
     app.state.cave_client = cave_client
@@ -181,17 +232,24 @@ async def lifespan(app: FastAPI):
     # Create connection manager
     app.state.connection_manager = MultiClientManager()
 
-    # 註冊消息處理器 - 添加這一行！
+    # 註冊消息處理器
     app.state.connection_manager.register_message_handler(process_user_message)
 
     logger.info("Server initialized successfully")
-
 
     yield  # This is where the app runs
 
     # Cleanup (if needed)
     logger.info("Server shutting down")
 
+    # Close any open client sessions
+    try:
+        await okx_client.close()
+        await third_party_client.close()
+        await cave_client.close()
+        await wallet_service_client.close()
+    except Exception as e:
+        logger.error(f"Error closing client sessions: {e}")
 
 
 class EnhancedZerePyServer:
@@ -208,34 +266,43 @@ class EnhancedZerePyServer:
             allow_headers=["*"],
         )
 
-
         # Set up routes
         self.setup_routes()
 
     def setup_routes(self):
         @self.app.websocket("/ws/{wallet_address}")
-        async def websocket_endpoint(websocket: WebSocket, wallet_address: str):
+        async def websocket_endpoint(websocket: WebSocket, wallet_address: str,
+                                     agent_name: str = Query(default="StarterAgent")):
             """WebSocket endpoint for client connections"""
             wallet_address = wallet_address.lower()  # Normalize wallet address
 
             # Get connection manager from app state
             connection_manager = self.app.state.connection_manager
             db_client = self.app.state.db_client
+            cli = self.app.state.cli
 
-            # Connect client (不需要保存 connection_info)
+            # Connect client
             await connection_manager.connect(wallet_address, websocket)
 
-            # Get or create user (不需要保存 user)
+            # Get or create user
             user = await db_client.get_user(wallet_address)
             if not user:
                 await db_client.create_user(wallet_address)
 
             # Create a dedicated agent for this user if not exists
             if not connection_manager.get_agent_for_user(wallet_address):
-                cli = ZerePyCLI()
-                # Load default agent
-                cli._load_default_agent()
-                connection_manager.set_agent_for_user(wallet_address, cli.agent)
+                # Load specified agent
+                try:
+                    cli._load_agent_from_file(agent_name)
+                    connection_manager.set_agent_for_user(wallet_address, cli.agent)
+                except Exception as e:
+                    logger.error(f"Error loading agent {agent_name}: {e}")
+                    await connection_manager.send_message(
+                        wallet_address,
+                        MessageStructure.format_error(f"Error loading agent {agent_name}: {str(e)}")
+                    )
+                    connection_manager.disconnect(wallet_address)
+                    return
 
             # Send welcome message
             welcome_message = MessageStructure.format_ai_response({
@@ -306,7 +373,11 @@ class EnhancedZerePyServer:
         @self.app.get("/health")
         async def health_check():
             """Health check endpoint"""
-            return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+            return {
+                "status": "healthy",
+                "timestamp": datetime.now().isoformat(),
+                "agent_count": len(self.app.state.connection_manager.user_agents)
+            }
 
         # Add more API routes here...
         @self.app.get("/api/get-cave-news")
@@ -351,14 +422,14 @@ class EnhancedZerePyServer:
                 }
 
             # 創建Agent
-            agent_id = str(uuid.uuid4())
+            agent_id = str(uuid4())
             await self.app.state.db_client.db.users.update_one(
                 {"wallet_address": wallet_address},
                 {"$set": {
                     "agent_id": agent_id,
                     "has_agent": True,
-                    "created_at": datetime.utcnow(),
-                    "last_active": datetime.utcnow()
+                    "created_at": datetime.now(),
+                    "last_active": datetime.now()
                 }}
             )
 
@@ -367,25 +438,6 @@ class EnhancedZerePyServer:
                 "message": "Agent created successfully",
                 "agent_id": agent_id
             }
-
-        # @self.app.post("/api/agent")
-        # async def create_agent_alt(wallet_address: str):
-        #     """創建Agent的另一個端點 (兼容舊版)"""
-        #     if not wallet_address:
-        #         raise HTTPException(status_code=400, detail="wallet_address is required")
-        #
-        #     wallet_address = wallet_address.lower()
-        #     user = await self.app.state.db_client.get_user(wallet_address)
-        #
-        #     if not user:
-        #         await self.app.state.db_client.create_user(wallet_address)
-        #
-        #     await self.app.state.db_client.db.users.update_one(
-        #         {"wallet_address": wallet_address},
-        #         {"$set": {"has_agent": True}}
-        #     )
-        #
-        #     return {"success": True, "message": "Agent created successfully."}
 
         @self.app.get("/api/agent-status/{wallet_address}")
         async def get_agent_status(wallet_address: str):
@@ -581,68 +633,32 @@ class EnhancedZerePyServer:
             except Exception as e:
                 logger.error(f"Error fetching tickers: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to fetch tickers: {str(e)}")
-    async def process_user_message(self, wallet_address: str, query: str):
-        """Process a user message and generate a response"""
-        # Get services from app state
-        connection_manager = self.app.state.connection_manager
-        db_client = self.app.state.db_client
 
-        # Mark agent as busy
-        connection_manager.set_agent_busy(wallet_address, True)
+        @self.app.get("/api/tools")
+        async def get_available_tools():
+            """Get list of available tools"""
+            from src.action_handler import action_registry
 
-        try:
-            # Get user's agent
-            agent = connection_manager.get_agent_for_user(wallet_address)
-            if not agent:
-                await connection_manager.send_message(
-                    wallet_address,
-                    MessageStructure.format_error("No agent available for this user.")
-                )
-                return
+            tools = []
+            for tool_name, tool_func in action_registry.items():
+                # Skip internal/system tools that shouldn't be exposed directly
+                if tool_name.startswith("_"):
+                    continue
 
-            # Send thinking status
-            thinking_message = MessageStructure.format_status("Thinking...")
-            await connection_manager.send_message(wallet_address, thinking_message)
+                # Get the docstring for the tool
+                doc = tool_func.__doc__ or "No description available."
+                doc = doc.strip()
 
-            # Get conversation history for context
-            history = await db_client.get_conversation_history(wallet_address)
+                # Add tool to list
+                tools.append({
+                    "name": tool_name,
+                    "description": doc
+                })
 
-            # Format history as context for the agent
-            context = ""
-            for msg in history[-5:]:  # Use last 5 messages for context
-                if msg["sender"] == "user":
-                    context += f"User: {msg['text']}\n"
-                elif msg["sender"] == "ai":
-                    context += f"Assistant: {msg['text']}\n"
-
-            # Generate response using agent's LLM
-            response = agent.prompt_llm(
-                prompt=query,
-                system_prompt=agent._construct_system_prompt() + f"\nConversation history:\n{context}"
-            )
-
-            # Format and send response
-            ai_response = MessageStructure.format_ai_response({
-                "recommendation": response
-            })
-
-            await db_client.save_message(wallet_address, ai_response)
-            await connection_manager.send_message(wallet_address, ai_response)
-
-        except Exception as e:
-            logger.exception(f"Error processing message: {e}")
-
-            # Send error message to client
-            error_message = MessageStructure.format_error(f"Sorry, I encountered an error: {str(e)}")
-            await db_client.save_message(wallet_address, error_message)
-            await connection_manager.send_message(wallet_address, error_message)
-
-        finally:
-            # Mark agent as not busy
-            connection_manager.set_agent_busy(wallet_address, False)
+            return {"tools": tools}
 
 
-def create_enhanced_server():
+def create_app():
     # Get MongoDB connection details from environment variables
     mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     database_name = os.getenv("DATABASE_NAME", "zerepy_db")

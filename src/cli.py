@@ -338,12 +338,27 @@ class ZerePyCLI:
             logger.info(f"\nNo default agent is loaded, please use the load-agent command to do that.")
 
     def _load_agent_from_file(self, agent_name):
-        try: 
+        try:
+            agent_path = Path("agents") / f"{agent_name}.json"
+            logger.info(f"Attempting to load agent from: {agent_path.absolute()}")
+            if not agent_path.exists():
+                logger.error(f"Agent file does not exist: {agent_path.absolute()}")
+                raise FileNotFoundError(f"Agent file not found: {agent_name}")
+
+            agent_dict = json.load(open(agent_path, "r"))
             self.agent = ZerePyAgent(agent_name)
             logger.info(f"\n✅ Successfully loaded agent: {self.agent.name}")
         except FileNotFoundError:
             logger.error(f"Agent file not found: {agent_name}")
             logger.info("Use 'list-agents' to see available agents.")
+            logger.info("Available agents:")
+            agents_dir = Path("agents")
+            if agents_dir.exists():
+                for agent_file in agents_dir.glob("*.json"):
+                    logger.info(f"  - {agent_file.stem}")
+            else:
+                logger.info("No agents directory found.")
+            raise
         except KeyError as e:
             logger.error(f"Invalid agent file: {e}")
         except Exception as e:
@@ -351,7 +366,18 @@ class ZerePyCLI:
 
     def _load_default_agent(self) -> None:
         """Load users default agent"""
-        agent_general_config_path = Path("agents") / "general.json"
+        # 使用絕對路徑
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        agent_general_config_path = os.path.join(project_root, "agents", "general.json")
+
+        print(agent_general_config_path)
+
+        agents_dir = Path("agents")
+        if agents_dir.exists():
+            logger.info("Available agents:")
+            for agent_file in agents_dir.glob("*.json"):
+                logger.info(f"  - {agent_file.stem}")
+
         file = None
         try:
             file = open(agent_general_config_path, 'r')
@@ -362,10 +388,10 @@ class ZerePyCLI:
 
             self._load_agent_from_file(data.get('default_agent'))
         except FileNotFoundError:
-            logger.error("File general.json not found, please create one.")
+            logger.error(f"File {agent_general_config_path} not found, please create one.")
             return
         except json.JSONDecodeError:
-            logger.error("File agents/general.json contains Invalid JSON format")
+            logger.error(f"File {agent_general_config_path} contains Invalid JSON format")
             return
         finally:
             if file:

@@ -4,9 +4,11 @@ import os
 
 import requests
 from dotenv import load_dotenv
+
 from src.action_handler import register_action
 
 logger = logging.getLogger("custom_actions.my_tools")
+
 
 # --- Example 1:  Check Wallet Balance (Generic - could be on any chain) ---
 
@@ -36,16 +38,16 @@ def check_wallet_balance(agent, **kwargs):
 
         # Assuming your EVMConnection, SolanaConnection, etc. have a get_balance method.
         #  Adapt this to your *actual* connection methods!
-        balance_result = connection.get_balance(token_address=token_address) # Adapt to actual connection methods.
+        balance_result = connection.get_balance(token_address=token_address)  # Adapt to actual connection methods.
 
-        if isinstance(balance_result, dict) and "balance" in balance_result: # Example return from a connection
+        if isinstance(balance_result, dict) and "balance" in balance_result:  # Example return from a connection
             # If token address isn't given, it's the base currency
             if not token_address:
                 token = "Base currency"
             else:
                 token = token_address
 
-            return f"Balance on {chain} ({token}): {balance_result['balance']}" # Create an easy to read output for the llm.
+            return f"Balance on {chain} ({token}): {balance_result['balance']}"  # Create an easy to read output for the llm.
         else:
             logger.error(f"Unexpected balance result format: {balance_result}")
             return f"Error: Could not retrieve balance for {chain}."
@@ -54,6 +56,7 @@ def check_wallet_balance(agent, **kwargs):
     except Exception as e:
         logger.exception(f"Error checking balance: {e}")
         return f"Error: An unexpected error occurred: {e}"
+
 
 # --- Example 2:  Add to Whitelist ---
 
@@ -86,13 +89,15 @@ def add_to_whitelist(agent, **kwargs):
         agent.config["whitelist"].append(address)
         # You would also need to save the updated agent config here!
         #  This depends on how you manage agent configurations.
-        agent.save_config() #  <---  IMPORTANT!  Add a save_config() method to your Agent class
+        agent.save_config()  #  <---  IMPORTANT!  Add a save_config() method to your Agent class
 
         return f"Address {address} added to the whitelist."
 
     except Exception as e:
         logger.exception(f"Error adding to whitelist: {e}")
         return f"Error: An unexpected error occurred: {e}"
+
+
 # --- Example 3:  Swap Tokens (Generic - could be on any chain) ---
 
 @register_action("swap-tokens")
@@ -129,5 +134,3 @@ def swap_tokens(agent, **kwargs):
     except Exception as e:
         logger.exception(f"Error swapping tokens: {e}")
         return f"Error: An unexpected error occurred: {e}"
-
-

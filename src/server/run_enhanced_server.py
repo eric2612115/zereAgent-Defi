@@ -3,7 +3,7 @@
 import uvicorn
 import os
 from dotenv import load_dotenv
-from src.server.enhanced_server import create_enhanced_server
+from enhanced_server import create_enhanced_server
 
 # Load environment variables
 load_dotenv()

@@ -1,4 +1,4 @@
-# src/server/enhanced_server.py
+# root path: enhanced_server.py
 
 import asyncio
 import logging
@@ -65,6 +65,77 @@ class MessageStructure:
 # Define FastAPI lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    async def process_user_message(wallet_address: str, message_data: dict):
+        """處理用戶消息並生成回應"""
+        query = message_data.get("query", "")
+        if not query:
+            return "Please provide a query."
+
+        # 獲取應用狀態中的服務
+        connection_manager = app.state.connection_manager
+        db_client = app.state.db_client
+
+        # 將 agent 設置為忙碌狀態
+        connection_manager.set_agent_busy(wallet_address, True)
+
+        try:
+            # 獲取用戶的 agent
+            agent = connection_manager.get_agent_for_user(wallet_address)
+            if not agent:
+                await connection_manager.send_message(
+                    wallet_address,
+                    {"sender": "system", "text": "No agent available for this user.", "message_type": "error"}
+                )
+                return
+
+            # 發送思考中狀態
+            thinking_message = {"sender": "system", "text": "Thinking...", "message_type": "thinking"}
+            await connection_manager.send_message(wallet_address, thinking_message)
+
+            # 使用 agent 的 LLM 生成回應
+            try:
+                # 使用您的 ZerePyCLI 實例
+                cli = agent  # 假設 get_agent_for_user 返回的是 ZerePyCLI 實例
+
+                # 使用 anthropic 生成文本
+                result = cli.connection_manager.perform_action(
+                    connection_name="anthropic",
+                    action_name="generate-text",
+                    params=[query, cli._construct_system_prompt()]
+                )
+
+                # 格式化並發送回應
+                ai_response = {
+                    "id": str(uuid4()),
+                    "sender": "ai",
+                    "text": result,
+                    "message_type": "normal",
+                    "timestamp": datetime.now().isoformat()
+                }
+
+                await db_client.save_message(wallet_address, ai_response)
+                await connection_manager.send_message(wallet_address, ai_response)
+
+                return result
+
+            except Exception as e:
+                logger.exception(f"Error generating response: {e}")
+                return f"Error generating response: {str(e)}"
+
+        except Exception as e:
+            logger.exception(f"Error processing message: {e}")
+
+            # 發送錯誤消息給客戶端
+            error_message = {"sender": "system", "text": f"Sorry, I encountered an error: {str(e)}",
+                             "message_type": "error"}
+            await db_client.save_message(wallet_address, error_message)
+            await connection_manager.send_message(wallet_address, error_message)
+
+            return f"Error: {str(e)}"
+
+        finally:
+            # 將 agent 設置為非忙碌狀態
+            connection_manager.set_agent_busy(wallet_address, False)
     # Database client
     mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     database_name = os.getenv("DATABASE_NAME", "zerepy_db")
@@ -110,12 +181,17 @@ async def lifespan(app: FastAPI):
     # Create connection manager
     app.state.connection_manager = MultiClientManager()
 
+    # 註冊消息處理器 - 添加這一行！
+    app.state.connection_manager.register_message_handler(process_user_message)
+
     logger.info("Server initialized successfully")
+
 
     yield  # This is where the app runs
 
     # Cleanup (if needed)
     logger.info("Server shutting down")
+
 
 
 class EnhancedZerePyServer:
@@ -132,6 +208,7 @@ class EnhancedZerePyServer:
             allow_headers=["*"],
         )
 
+
         # Set up routes
         self.setup_routes()
 
@@ -145,13 +222,13 @@ class EnhancedZerePyServer:
             connection_manager = self.app.state.connection_manager
             db_client = self.app.state.db_client
 
-            # Connect client
-            connection_info = await connection_manager.connect(wallet_address, websocket)
+            # Connect client (不需要保存 connection_info)
+            await connection_manager.connect(wallet_address, websocket)
 
-            # Get or create user
+            # Get or create user (不需要保存 user)
             user = await db_client.get_user(wallet_address)
             if not user:
-                user = await db_client.create_user(wallet_address)
+                await db_client.create_user(wallet_address)
 
             # Create a dedicated agent for this user if not exists
             if not connection_manager.get_agent_for_user(wallet_address):

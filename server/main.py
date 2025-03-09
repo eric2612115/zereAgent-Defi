@@ -628,7 +628,7 @@ async def root():
 async def list_agents():
     try:
         agents = []
-        agents_dir = Path("agents")
+        agents_dir = Path("../src/server/agents")
         if agents_dir.exists():
             for agent_file in agents_dir.glob("*.json"):
                 if agent_file.stem != "general":

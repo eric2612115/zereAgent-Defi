@@ -134,19 +134,32 @@ class MultiClientManager:
         logger.info(f"Agent set for user {wallet_address}")
 
     def register_message_handler(self, handler: Callable):
-        """Register a function to handle incoming messages"""
+        """註冊處理消息的回調函數"""
+        if not hasattr(self, 'message_handlers'):
+            self.message_handlers = []
         self.message_handlers.append(handler)
-        logger.info(f"Registered message handler: {handler.__name__}")
+        logger.info(f"Message handler registered: {handler.__name__}")
 
     async def handle_client_message(self, wallet_address: str, message_data: Any):
         """Process an incoming client message using registered handlers"""
         if not self.message_handlers:
             logger.warning("No message handlers registered")
+            # 直接向客戶端發送錯誤消息
+            await self.send_message(
+                wallet_address,
+                {"text": "Server is not configured to handle messages", "message_type": "error", "sender": "system"}
+            )
             return {"error": "No message handlers configured"}
 
         # Update last activity time
         if wallet_address in self.user_sessions:
             self.user_sessions[wallet_address]["last_message_time"] = datetime.now()
+
+        # 通知用戶我們正在處理請求
+        await self.send_message(
+            wallet_address,
+            {"text": "Processing your request...", "message_type": "thinking", "sender": "system"}
+        )
 
         # Call all registered handlers
         results = []
@@ -156,8 +169,15 @@ class MultiClientManager:
                 results.append(result)
             except Exception as e:
                 logger.error(f"Error in message handler {handler.__name__}: {e}")
-                results.append({"error": str(e)})
+                error_result = {"error": str(e)}
+                results.append(error_result)
+                # 向客戶端發送錯誤消息
+                await self.send_message(
+                    wallet_address,
+                    {"text": f"Error processing your request: {str(e)}", "message_type": "error", "sender": "system"}
+                )
 
+        # 返回第一個結果（如果有的話）
         return results[0] if results else {"error": "Message processing failed"}
 
     async def _ping_clients(self):
